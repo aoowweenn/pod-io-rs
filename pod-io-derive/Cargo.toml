@@ -1,0 +1,15 @@
+[package]
+name = "pod_io_derive"
+version = "0.1.0"
+authors = ["aoowweenn <aoowweenn@gmail.com>"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "*"
+byteorder = "*"
+
+[dependencies.syn]
+version = "*"
+features = ["extra-traits"]

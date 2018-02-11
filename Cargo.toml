@@ -1,0 +1,8 @@
+[package]
+name = "pod_io"
+version = "0.1.0"
+authors = ["aoowweenn <aoowweenn@gmail.com>"]
+
+[dependencies]
+byteorder = "*"
+pod_io_derive = { path = "pod-io-derive" }
