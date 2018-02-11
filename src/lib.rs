@@ -15,65 +15,70 @@ trait Decode {
     fn decode<T: ByteOrder, R: Read>(r: &mut R) -> Result<Self::Output>;
 }
 
-impl Decode for u8 {
-    type Output = u8;
-    fn decode<T: ByteOrder, R: Read>(r: &mut R) -> Result<u8> {
-        r.read_u8()
-    }
-}
-
-impl Decode for i8 {
-    type Output = i8;
-    fn decode<T: ByteOrder, R: Read>(r: &mut R) -> Result<i8> {
-        r.read_i8()
-    }
-}
-
 macro_rules! impl_decode {
-    ($ty:ty, $fn:ident) => (
+    (byte => $r:ident, $fn:ident) => ($r.$fn());
+    (bytes => $r:ident, $fn:ident) => ($r.$fn::<T>());
+    ($i:ident, $ty:ty, $fn:ident) => (
         impl Decode for $ty {
             type Output = $ty;
             fn decode<T: ByteOrder, R: Read>(r: &mut R) -> Result<$ty> {
-                r.$fn::<T>()
+                impl_decode!($i => r, $fn)
             }
         }
     );
 }
 
 macro_rules! impl_decode_array {
-    ($ty:ty, $len:expr, $fn:ident) => (
+    (byte => $r:ident, $ty:ty, $len:expr, $fn:ident) => ({
+        let mut buf: [u8; $len] = [0; $len];
+        $r.$fn(&mut buf)?;
+        unsafe { std::mem::transmute::<[u8; $len], [$ty; $len]>(buf) }
+    });
+    (bytes => $r:ident, $ty:ty, $len:expr, $fn:ident) => ({
+        let mut buf: [$ty; $len] = [0; $len];
+        $r.$fn::<T>(&mut buf)?;
+        buf
+    });
+    (floats => $r:ident, $ty:ty, $len:expr, $fn:ident) => ({
+        let mut buf: [$ty; $len] = [0.0; $len];
+        $r.$fn::<T>(&mut buf)?;
+        buf
+    });
+    ($i:ident, $ty:ty, $len:expr, $fn:ident) => (
         impl Decode for [$ty; $len] {
             type Output = [$ty; $len];
             fn decode<T: ByteOrder, R: Read>(r: &mut R) -> Result<[$ty; $len]> {
-                let mut buf: [$ty; $len] = [0 as $ty; $len];
-                r.$fn::<T>(&mut buf)?;
-                Ok(buf)
+                Ok(impl_decode_array!($i => r, $ty, $len, $fn))
             }
         }
     );
-    ($ty:ty, $fn:ident) => (
-        impl_decode_array!($ty, 2, $fn);
-        impl_decode_array!($ty, 3, $fn);
-        impl_decode_array!($ty, 4, $fn);
+    ($i:ident, $ty:ty, $fn:ident) => (
+        impl_decode_array!($i, $ty, 2, $fn);
+        impl_decode_array!($i, $ty, 3, $fn);
+        impl_decode_array!($i, $ty, 4, $fn);
     );
 }
 
-impl_decode!(u16, read_u16);
-impl_decode!(i16, read_i16);
-impl_decode!(u32, read_u32);
-impl_decode!(i32, read_i32);
-impl_decode!(u64, read_u64);
-impl_decode!(i64, read_i64);
-impl_decode!(f32, read_f32);
-impl_decode!(f64, read_f64);
-impl_decode_array!(u16, read_u16_into);
-impl_decode_array!(i16, read_i16_into);
-impl_decode_array!(u32, read_u32_into);
-impl_decode_array!(i32, read_i32_into);
-impl_decode_array!(u64, read_u64_into);
-impl_decode_array!(i64, read_i64_into);
-impl_decode_array!(f32, read_f32_into);
-impl_decode_array!(f64, read_f64_into);
+impl_decode!(byte, u8, read_u8);
+impl_decode!(byte, i8, read_i8);
+impl_decode!(bytes, u16, read_u16);
+impl_decode!(bytes, i16, read_i16);
+impl_decode!(bytes, u32, read_u32);
+impl_decode!(bytes, i32, read_i32);
+impl_decode!(bytes, u64, read_u64);
+impl_decode!(bytes, i64, read_i64);
+impl_decode!(bytes, f32, read_f32);
+impl_decode!(bytes, f64, read_f64);
+impl_decode_array!(byte, u8, read_exact);
+impl_decode_array!(byte, i8, read_exact);
+impl_decode_array!(bytes, u16, read_u16_into);
+impl_decode_array!(bytes, i16, read_i16_into);
+impl_decode_array!(bytes, u32, read_u32_into);
+impl_decode_array!(bytes, i32, read_i32_into);
+impl_decode_array!(bytes, u64, read_u64_into);
+impl_decode_array!(bytes, i64, read_i64_into);
+impl_decode_array!(floats, f32, read_f32_into);
+impl_decode_array!(floats, f64, read_f64_into);
 
 #[cfg(test)]
 mod tests {
