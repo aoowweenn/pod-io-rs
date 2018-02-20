@@ -9,6 +9,7 @@ proc-macro = true
 [dependencies]
 quote = "*"
 byteorder = "*"
+proc-macro2 = "*"
 
 [dependencies.syn]
 version = "*"

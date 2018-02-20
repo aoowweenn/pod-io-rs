@@ -1,40 +1,89 @@
+#![recursion_limit="128"]
+
 extern crate proc_macro;
 extern crate syn;
 #[macro_use]
 extern crate quote;
 
-use proc_macro::TokenStream;
+extern crate proc_macro2;
 
-#[proc_macro_derive(Decode, attributes(LE, BE))]
+use proc_macro::TokenStream;
+use proc_macro2::Term;
+
+#[proc_macro_derive(Decode, attributes(LE, BE, Arg))]
 pub fn decode_derive(input: TokenStream) -> TokenStream {
     let ast = syn::parse(input).unwrap();
     let gen = impl_decode(ast);
     gen.into()
 }
 
+fn is_outer_attr(attr: &&syn::Attribute) -> bool {
+    attr.style == syn::AttrStyle::Outer && !attr.is_sugared_doc //&& !attr.path.segments.is_empty()
+}
+
+fn is_arg_attr(attr: &&syn::Attribute) -> bool {
+    if let Some(seg) = attr.path.segments.first() {
+        seg.value().ident == syn::Ident::from("Arg")
+    } else {
+        false
+    }
+}
+
+fn is_byte_order_attr(attr: &&syn::Attribute) -> bool {
+    if let Some(seg) = attr.path.segments.first() {
+        seg.value().ident == syn::Ident::from("BE") ||
+        seg.value().ident == syn::Ident::from("LE")
+    } else {
+        false
+    }
+}
+
+fn attr_to_argty(attr: &syn::Attribute) -> Term {
+    let meta = attr.interpret_meta().expect("Can't parse your custom attribute");
+    if let syn::Meta::NameValue(meta_namevalue) = meta {
+        if let syn::Lit::Str(s) = meta_namevalue.lit {
+            //return syn::Ident::from(s.value())
+            return Term::intern(&s.value())
+        } else {}
+    } else {}
+    panic!("This attribute is not the form of #[Arg = \"YourType\"]")
+}
+
+fn attr_to_byte_order(attr: &syn::Attribute) -> syn::Ident {
+    let meta = attr.interpret_meta().expect("Can't parse your custom attribute");
+    if let syn::Meta::Word(ident) = meta {
+        ident
+    } else {
+        panic!("This attribute is neither #[BE] nor #[LE]")
+    }
+}
+
 fn impl_decode(ast: syn::DeriveInput) -> quote::Tokens {
     let name = &ast.ident;
+    let argty = ast.attrs.iter().filter(is_outer_attr)
+                                .filter(is_arg_attr).next()
+                                .map(attr_to_argty).unwrap_or(Term::intern("Nil"));
     if let syn::Data::Struct(data) = ast.data {
         match data.fields {
             syn::Fields::Named(fields) => {
                 let ident: Vec<Option<syn::Ident> > = fields.named.iter().map(|f| f.ident).collect();
                 let ident_clone = ident.clone();
                 let ty = fields.named.iter().map(|f| f.ty.clone());
-                let byte_order = fields.named.iter().map(|f| -> syn::Ident {
-                    for attr in f.attrs.iter() {
-                        if attr.style == syn::AttrStyle::Outer && !attr.is_sugared_doc && !attr.path.segments.is_empty() {
-                            if let Some(seg) = attr.path.segments.first() {
-                                return seg.value().ident;
-                            }
-                        }
-                    }
-                    syn::Ident::from("LE")
-                });
+                let byte_order = fields.named.iter().map(|f|
+                    f.attrs.iter().filter(is_outer_attr)
+                                .filter(is_byte_order_attr)
+                                .next().map(attr_to_byte_order)
+                                .unwrap_or(syn::Ident::from("LE"))
+                );
+                let arg = fields.named.iter().map(|f|
+                    f.attrs.iter().filter(is_outer_attr)
+                                .filter(is_arg_attr)
+                                .next().map_or(syn::Ident::from("Nil"), |_| syn::Ident::from("_p"))
+                );
                 quote! {
-                    impl Decode for #name {
-                        type Output = #name;
-                        fn decode<T: ByteOrder, R: std::io::Read>(r: &mut R) -> std::io::Result<#name> {
-                            #( let #ident = <#ty>::decode::<#byte_order, _>(r)?; )*
+                    impl<'a, R: ::std::io::Read> Decode<R, #argty> for #name {
+                        fn decode<T: ByteOrder>(r: &mut R, _p: #argty) -> ::std::io::Result<#name> {
+                            #( let #ident = <#ty>::decode::<#byte_order>(r, #arg)?; )*
                             Ok(#name {
                                 #(#ident_clone),*
                             })
