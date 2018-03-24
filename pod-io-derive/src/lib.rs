@@ -10,7 +10,7 @@ extern crate proc_macro2;
 use proc_macro::TokenStream;
 use proc_macro2::Term;
 
-#[proc_macro_derive(Decode, attributes(LE, BE, Arg))]
+#[proc_macro_derive(Decode, attributes(LE, BE, Arg, Parameter))]
 pub fn decode_derive(input: TokenStream) -> TokenStream {
     let ast = syn::parse(input).unwrap();
     let gen = impl_decode(ast);
@@ -29,6 +29,14 @@ fn is_arg_attr(attr: &&syn::Attribute) -> bool {
     }
 }
 
+fn is_parameter_attr(attr: &&syn::Attribute) -> bool {
+    if let Some(seg) = attr.path.segments.first() {
+        seg.value().ident == syn::Ident::from("Parameter")
+    } else {
+        false
+    }
+}
+
 fn is_byte_order_attr(attr: &&syn::Attribute) -> bool {
     if let Some(seg) = attr.path.segments.first() {
         seg.value().ident == syn::Ident::from("BE") ||
@@ -38,15 +46,15 @@ fn is_byte_order_attr(attr: &&syn::Attribute) -> bool {
     }
 }
 
-fn attr_to_argty(attr: &syn::Attribute) -> Term {
+fn attr_to_term(attr: &syn::Attribute) -> Term {
     let meta = attr.interpret_meta().expect("Can't parse your custom attribute");
     if let syn::Meta::NameValue(meta_namevalue) = meta {
         if let syn::Lit::Str(s) = meta_namevalue.lit {
             //return syn::Ident::from(s.value())
             return Term::intern(&s.value())
-        } else {}
-    } else {}
-    panic!("This attribute is not the form of #[Arg = \"YourType\"]")
+        }
+    }
+    panic!("This attribute is not the form of #[Parameter = \"YourType\"] or #[Arg = \"YourArg\"]")
 }
 
 fn attr_to_byte_order(attr: &syn::Attribute) -> syn::Ident {
@@ -61,8 +69,9 @@ fn attr_to_byte_order(attr: &syn::Attribute) -> syn::Ident {
 fn impl_decode(ast: syn::DeriveInput) -> quote::Tokens {
     let name = &ast.ident;
     let argty = ast.attrs.iter().filter(is_outer_attr)
-                                .filter(is_arg_attr).next()
-                                .map(attr_to_argty).unwrap_or(Term::intern("Nil"));
+                                .filter(is_parameter_attr).next()
+                                .map(attr_to_term)
+                                .unwrap_or(Term::intern("Nil"));
     if let syn::Data::Struct(data) = ast.data {
         match data.fields {
             syn::Fields::Named(fields) => {
@@ -77,12 +86,14 @@ fn impl_decode(ast: syn::DeriveInput) -> quote::Tokens {
                 );
                 let arg = fields.named.iter().map(|f|
                     f.attrs.iter().filter(is_outer_attr)
-                                .filter(is_arg_attr)
-                                .next().map_or(syn::Ident::from("Nil"), |_| syn::Ident::from("_p"))
+                                .filter(is_arg_attr).next()
+                                .map(attr_to_term)
+                                .unwrap_or(Term::intern("Nil"))
                 );
                 quote! {
+                    #[allow(unused_variables)]
                     impl<'a, R: ::std::io::Read> Decode<R, #argty> for #name {
-                        fn decode<T: ByteOrder>(r: &mut R, _p: #argty) -> ::std::io::Result<#name> {
+                        fn decode<T: ByteOrder>(r: &mut R, p: #argty) -> ::std::io::Result<#name> {
                             #( let #ident = <#ty>::decode::<#byte_order>(r, #arg)?; )*
                             Ok(#name {
                                 #(#ident_clone),*
